@@ -1,0 +1,10 @@
+
+
+# Ignore big data file
+data/*
+
+# Ignore logs
+logs/*
+
+# Ignore cache files
+__pycache__/*
