@@ -26,10 +26,10 @@ def expectation(
     marginal_prob = np.where(marginal_prob == 0, 1e-10, marginal_prob)  # Avoid division by zero
 
     # Posterior probability P(s|z) = P(z|s)P(s) / P(z)
-    prob_type_per_signature = (signature_matrix * signature_prop) / marginal_prob[:, None] # gamma (n_mutation_types 96 x n_signatures_types 97)
+    prob_type_per_signature = (signature_matrix * signature_prop).div(marginal_prob, axis=0) # gamma (n_mutation_types 96 x n_signatures_types 97)
 
     # Expected counts E[n_{z,s}] = n_z * P(s|z)
-    expected_counts_per_signature = mutation_vector[:, None] * prob_type_per_signature # (n_mutation_types 96 x n_signatures_types 97)
+    expected_counts_per_signature = prob_type_per_signature.mul(mutation_vector, axis=0) # (n_mutation_types 96 x n_signatures_types 97)
 
     # q_function = sum_ks E[n_{z,s}] * log(P(s) * P(z|s))
     joint_prob = signature_prop * signature_matrix  # P(s) * P(z|s) (n_signatures_types 97 x n_mutation_types 96)
@@ -180,5 +180,5 @@ def signatures_visualization(
     fig.tight_layout()
 
     ax.set_title('EM Derived Signature Contributions vs Observed Mutation Counts')
-    plt.savefig('signature_image.png', dpi=300, bbox_inches="tight")
+    plt.savefig('images/signature_image.png', dpi=300, bbox_inches="tight")
     fig.show()

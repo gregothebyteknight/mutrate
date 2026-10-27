@@ -80,6 +80,7 @@ def plot_coverage_vs_target_size(reaction_yield, genome_size, target_sizes, meth
     ax.set_title(f"PacBio Revio Coverage vs Target Size (Yield: {reaction_yield:.0f} Kb)", fontsize=13)
     ax.legend(frameon=True, fontsize=10)
     plt.tight_layout()
+    plt.savefig('images/coverage_vs_target_size.png', dpi=300, bbox_inches="tight")
     plt.show()
 
 

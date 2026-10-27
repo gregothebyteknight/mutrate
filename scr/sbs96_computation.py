@@ -40,11 +40,12 @@ def add_sample_metadata(mutations: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def tri_prop(seq_path: str) -> np.array:
+def tri_prop(seq_path: str, tri_types: list) -> np.array:
     """Count trinucleotide occurrences in a DNA sequence.
 
     Parameters:
     seq_path (str): The path to the FASTA file containing the DNA sequence.
+    tri_types (list): A list of trinucleotide contexts to count.
 
     Returns:
     np.array: An array of proportions of each trinucleotide context in the sequence, ordered alphabetically.
@@ -59,6 +60,8 @@ def tri_prop(seq_path: str) -> np.array:
     print(f"Length of target sequence: {len(sequence)}")
 
     tri_count = Counter()
+    tri_count.update({tri: 0 for tri in tri_types})
+
     for i in range(len(sequence) - 2):
         t = sequence[i:i+3]
         if "N" in t:
@@ -87,7 +90,8 @@ def tri_correct(mut_matrix: pd.DataFrame,
     pd.DataFrame: A DataFrame with corrected mutation counts for each trinucleotide context.
     """
     genome_tri_prop = pd.read_csv(genome_tri_prop_path, index_col=0).iloc[:, 0]
-    seq_tri_prop = tri_prop(seq_path)
+    tri_types = sorted(list(genome_tri_prop.index))
+    seq_tri_prop = tri_prop(seq_path, tri_types)
     weights = pd.Series(
         genome_tri_prop.to_numpy() / seq_tri_prop,
         index=genome_tri_prop.index.astype(str),
@@ -261,4 +265,6 @@ def plot_sbs96_matrix(
     ax.margins(x=0.01)
     if ax.figure.axes[0] is ax:
         ax.figure.subplots_adjust(right=0.84, bottom=0.24)
+
+    plt.savefig('images/sbs96_matrix.png', dpi=300, bbox_inches="tight")
     return ax
