@@ -1,6 +1,7 @@
 
 import numpy as np
 import pandas as pd
+import argparse
 
 
 def expectation(
@@ -77,22 +78,23 @@ def em_algorithm(
 ) -> tuple[np.ndarray, list[float], pd.DataFrame, pd.DataFrame]:
     """
     Perform the EM algorithm to estimate the proportions of mutation signatures in a given set of mutations.
-    Input:
-    mutation_df: A pandas DataFrame containing the observed mutation counts for each trinucleotide context. 
-    it should have columns "tri", "sub", and "count" representing the trinucleotide context, substitution type, and observed counts, respectively.
-    cosmic_path: A string representing the path to the COSMIC database file.
-    signature_matrix: A 2D numpy array of shape (96, K) representing the mutation signatures, where K is the number of signatures
-    signature_prop: A 1D numpy array of shape (K,) representing the initial proportions of each signature in the mixture model.
-    max_iter: An integer representing the maximum number of iterations to perform.
-    tol: A float representing the tolerance for convergence. The algorithm will stop if the change in log-likelihood is less than this value.
-    
-    Output:
-    signature_prop: A 1D numpy array of shape (K,) representing the estimated proportions of each signature in the mixture model.
-    q_function_values: A list of floats representing the values of the Q(pi|pi^t) function at each iteration.
-    expected_counts_per_signature: A 2D numpy array of shape (96, K) representing the expected counts of mutations for each trinucleotide context and signature.
-    normalized_mutation_df: A pandas DataFrame containing the normalized mutation counts for each trinucleotide context.
-    """
 
+    Input:
+    * mutation_df: A pandas DataFrame containing the observed mutation counts for each trinucleotide context. 
+    it should have columns "tri", "sub", and "count" representing the trinucleotide context, substitution type, and observed counts, respectively.
+    * cosmic_path: A string representing the path to the COSMIC database file.
+    * signature_matrix: A 2D numpy array of shape (96, K) representing the mutation signatures, where K is the number of signatures
+    * signature_prop: A 1D numpy array of shape (K,) representing the initial proportions of each signature in the mixture model.
+    * max_iter: An integer representing the maximum number of iterations to perform.
+    * tol: A float representing the tolerance for convergence. The algorithm will stop if the change in log-likelihood is less than this value.
+    * dirichlet_beta: A float representing the beta parameter for the Dirichlet prior.
+
+    Output:
+    * signature_prop: A 1D numpy array of shape (K,) representing the estimated proportions of each signature in the mixture model.
+    * q_function_values: A list of floats representing the values of the Q(pi|pi^t) function at each iteration.
+    * expected_counts_per_signature: A 2D numpy array of shape (96, K) representing the expected counts of mutations for each trinucleotide context and signature.
+    * normalized_mutation_df: A pandas DataFrame containing the normalized mutation counts for each trinucleotide context.
+    """
 
     # Mutation vector constructed from the mutation pd.DataFrame produced by sbs96_computation script
     mutation_df_copy = mutation_df.copy()
@@ -182,3 +184,30 @@ def signatures_visualization(
     ax.set_title('EM Derived Signature Contributions vs Observed Mutation Counts')
     plt.savefig('images/signature_image.png', dpi=300, bbox_inches="tight")
     fig.show()
+
+
+    if __name__ == "__main__":
+
+        parser = argparse.ArgumentParser(description='Run EM algorithm for mutation signature estimation.')
+        parser.add_argument('--mutation_df', type=str, required=True, help='Path to the mutation DataFrame CSV file.')
+        parser.add_argument('--cosmic_path', type=str, required=True, help='Path to the COSMIC signature matrix CSV file.')
+        parser.add_argument('--max_iter', type=int, default=1000, help='Maximum number of iterations for the EM algorithm (default: 1000).')
+        parser.add_argument('--tol', type=float, default=1e-6, help='Tolerance for convergence (default: 1e-6).')
+        parser.add_argument('--dirichlet_beta', type=float, default=0.1, help='Dirichlet prior parameter (default: 0.1).')
+        parser.add_argument('--is_visualize', type=bool, default=False, help='Whether to visualize the signature contribution')
+
+        args = parser.parse_args()
+
+        mutation_df = pd.read_csv(args.mutation_df)
+        _, q_function_values, expected_counts_per_signature, normalized_matrix = em_algorithm(
+            mutation_df=mutation_df,
+            cosmic_path=args.cosmic_path,
+            max_iter=args.max_iter,
+            tol=args.tol,
+            dirichlet_beta=args.dirichlet_beta
+        )
+
+        
+        if args.is_visualize:
+            em_visualization(q_function_values)
+            signatures_visualization(expected_counts_per_signature, normalized_matrix)

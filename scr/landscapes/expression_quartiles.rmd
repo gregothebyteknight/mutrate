@@ -1,0 +1,127 @@
+
+
+### Classification of expression quartiles
+I want to classify the expression levels of genes into quartiles. 
+This will help in understanding the distribution of gene expression across different samples and conditions.
+Resulting variable will be a factor indicating the quartile of expression for each gene.
+```{r}
+# Load necessary libraries
+library(readr)
+library(dplyr)
+library(rtracklayer)
+library(GenomicRanges)
+```
+
+```{r}
+rpkm_data <- read_tsv("data/landscapes/features/57epigenomes.RPKM.pc.gz")
+gene_meta <- read_tsv("data/landscapes/features/Ensembl_v65.Gencode_v10.ENSG.gene_info.txt", #nolint
+                      col_names = FALSE)
+rpkm_e116 <- rpkm_data |> select(gene_id, E116)
+pc_names <- rpkm_data$gene_id
+
+names(gene_meta) <- c("gene_id", "chr", "start", "end", "strand",
+                      "gene_type", "gene_name", "gene_descr")
+
+rm(rpkm_data)
+```
+
+```{r}
+genome_ranges_10kb <- read_csv("data/landscapes/hg19_1Mb_coords.csv")
+
+regions <- GRanges(
+  seqnames = genome_ranges_10kb$chr,
+  ranges = IRanges(start = genome_ranges_10kb$start,
+                   end = genome_ranges_10kb$end)
+)
+```
+# quartile classification
+```{r}
+quartiles <- quantile(rpkm_e116$E116,
+                      probs = seq(0, 1, 0.25),
+                      na.rm = TRUE)
+```
+
+```{r}
+rpkm_e116 <- rpkm_e116 |>
+  mutate(expression_quartile = cut(E116,
+                                   breaks = quartiles,
+                                   labels = c("Q1", "Q2", "Q3", "Q4"),
+                                   include.lowest = TRUE)) |>
+  mutate(expression_quartile = ifelse(E116 == 0, "Q0",
+                                      as.character(expression_quartile)))
+```
+
+# intergenic regions annotation
+```{r}
+# get coordinates of the coding genes
+coding_genes <- gene_meta |>
+  filter(gene_id %in% pc_names) |>
+  left_join(rpkm_e116 |> select(gene_id, expression_quartile),
+            by = "gene_id")
+```
+
+```{r}
+coding_ranges <- GRanges(
+  seqnames = paste0("chr", coding_genes$chr),
+  ranges = IRanges(start = coding_genes$start,
+                   end = coding_genes$end)
+)
+```
+
+```{r}
+# find intergenic regions by subtracting coding gene ranges
+# from the genome ranges
+genomic_overlaps <- GenomicRanges::findOverlaps(regions, coding_ranges)
+overlapping_region_indices <- unique(queryHits(genomic_overlaps))
+intergenic_ranges <- regions[!seq_along(regions) %in%
+                               overlapping_region_indices]
+```
+
+```{r}
+expression_quartile_table <- tibble(chr = genome_ranges_10kb$chr,
+                                    start = genome_ranges_10kb$start,
+                                    end = genome_ranges_10kb$end,
+                                    expression_quartile = NA_character_,
+                                    kb_id = genome_ranges_10kb$kb_id)
+```
+
+```{r}
+expression_quartile_table$expression_quartile[
+  !seq_along(regions) %in% overlapping_region_indices
+] <- "intergenic"
+```
+
+```{r}
+genomic_overlaps_tibble <- as_tibble(genomic_overlaps) |>
+  distinct(queryHits, .keep_all = TRUE) |>
+  mutate(expression_quartile = coding_genes$expression_quartile[subjectHits])
+```
+
+```{r}
+expression_quartile_table$expression_quartile[
+  genomic_overlaps_tibble$queryHits
+] <- genomic_overlaps_tibble$expression_quartile
+```
+
+```{r}
+write.csv(expression_quartile_table,
+          "data/landscapes/features/expression_quartiles.csv",
+          row.names = FALSE)
+```
+
+```{r}
+gene_meta |> count(gene_type, sort = TRUE)
+```
+
+### Non-protein coding genes
+```{r}
+rpkm_nc <- read_tsv("data/landscapes/features/57epigenomes.RPKM.nc.gz") |>
+  select(gene_id, E116)
+```
+
+```{r}
+nc_names <- rpkm_nc$gene_id
+gene_meta |>
+  filter(gene_id %in% nc_names) |>
+  left_join(rpkm_nc, by = "gene_id")
+```

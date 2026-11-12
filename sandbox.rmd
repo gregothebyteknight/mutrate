@@ -1,0 +1,263 @@
+
+```{r}
+library(tidyverse)
+library(BSgenome)
+library(Biostrings)
+library(GenomicRanges)
+library(rtracklayer)
+
+setwd(this.path::here())
+getwd()
+```
+
+### Build a table of 10kb coordinates for the human genome (hg19)
+
+```{r}
+chrom_sizes <- read.csv("data/landscapes/hg19.chrom_sizes.txt",
+                        sep = "\t", header = FALSE,
+                        col.names = c("index", "chr", "size"))
+rownames(chrom_sizes) <- chrom_sizes$chr
+chrom_sizes <- setNames(chrom_sizes$size, chrom_sizes$chr)
+```
+
+```{r}
+hg19 <- getBSgenome("BSgenome.Hsapiens.UCSC.hg19")
+```
+
+```{r}
+coords <- data.frame(
+  chr = character(),
+  start = integer(),
+  end = integer()
+)
+```
+
+```{r}
+for (chr in paste0("chr", c(as.character(seq(1, 22)), "X", "Y"))) {
+  chr_length <- chrom_sizes[[chr]]
+
+  starts <- seq(1, chr_length, by = 1e4)
+  ends <- pmin(starts + 1e4 - 1, chr_length)
+
+  coords <- rbind(
+    coords,
+    data.frame(
+      chr = chr,
+      start = starts,
+      end = ends
+    )
+  )
+
+  print(paste0(chr, " done"))
+}
+
+coords$kb_id <- paste0(coords$chr, ":", coords$start)
+coords$mb_id <- paste0(coords$chr, ":", (coords$start %/% 1e6) * 1e6 + 1)
+```
+
+```{r}
+write.csv(coords, "data/landscapes/hg19_1Mb_coords.csv", row.names = FALSE)
+```
+
+### Formating the VCF file to add two additional columns: 1) substitution type, 2) chromosome coordinates
+### and then map kb_id and mb_id from coordinates file to the VCF file based on chromosome and position.
+```{r}
+vcf_b <- read.csv("data/landscapes/SNV_BMemoryDF.vcf", sep = "\t")
+coords <- read.csv("data/landscapes/hg19_1Mb_coords.csv")
+```
+
+```{r}
+call_nucleotides <- function(chr, coord, ref, mut) {
+  chr <- sub("^chr", "", chr)
+  sequence <- hg19[[paste0("chr", chr)]]
+  positions <- (coord - 1):(coord + 1)
+
+  if (min(positions) < 1 || max(positions) > length(sequence)) {
+    return(NA_character_)
+  }
+
+  trinucleotide <- as.character(sequence[positions])
+
+  if (substr(trinucleotide, 2, 2) != ref) {
+    warning("VCF reference does not match genome at ", chr, ":", coord)
+    return(NA_character_)
+  }
+
+  if (ref %in% c("A", "G")) {
+    trinucleotide <- as.character(reverseComplement(sequence[positions]))
+    mut <- chartr("ACGT", "TGCA", mut)
+  }
+
+  paste0(paste0(trinucleotide, collapse = ""), ">", mut)
+}
+call_nucleotides("1", 4e6, "C", "T") # example usage
+```
+
+```{r}
+vcf_b$tri <- mapply(call_nucleotides,
+                    vcf_b$chr,
+                    vcf_b$pos,
+                    vcf_b$ref,
+                    vcf_b$mut)
+```
+
+```{r}
+call_reg_id <- function(chr, pos) {
+  chr <- paste0("chr", chr)
+  match <- which((coords$chr == chr) &
+                   (coords$start <= pos & coords$end >= pos))
+  kb_id <- coords[match, "kb_id"]
+  mb_id <- coords[match, "mb_id"]
+  if (length(kb_id) == 0) {
+    return(c(NA_character_, NA_character_))
+  }
+  c(kb_id, mb_id)
+}
+```
+```{r}
+vcf_b[c("kb_id", "mb_id")] <- t(mapply(
+  call_reg_id,
+  vcf_b$chr,
+  vcf_b$pos
+))
+
+write.csv(vcf_b, "data/landscapes/SNV_BMemoryDF_with_sub_and_coords.vcf",
+          row.names = FALSE)
+```
+
+### Compute genomic features for each 10kb region
+
+```{r}
+sum_bw <- BigWigFile("data/landscapes/features/wgEncodeUwRepliSeqGm12878SumSignalRep1.bigWig") #nolint
+wave_bw <- BigWigFile("data/landscapes/features/wgEncodeUwRepliSeqGm12878WaveSignalRep1.bigWig") #nolint
+
+regions <- GRanges(
+  seqnames = coords$chr,
+  ranges = IRanges(start = coords$start, end = coords$end)
+)
+```
+
+```{r}
+wave_values <- unlist(summary(
+  wave_bw,
+  which = regions,
+  size = 1,
+  type = "mean"
+))
+
+sum_values <- unlist(summary(
+  sum_bw,
+  which = regions,
+  size = 1,
+  type = "mean"
+))
+```
+
+```{r}
+replication_table <- data.frame(
+  kb_id = as.character(seqnames(regions)),
+  start = start(regions),
+  end = end(regions),
+  wave_signal = wave_values$score,
+  sum_signal = sum_values$score
+)
+```
+
+```{r}
+replication_table |>
+  dplyr::mutate(wave_signal = ifelse((!is.na(wave_signal)) &
+                                       (is.na(sum_signal)),
+                                     NA, wave_signal)) |>
+  summarise(
+    mean_wave_signal = mean(wave_signal, na.rm = TRUE),
+    mean_sum_signal = mean(sum_signal, na.rm = TRUE),
+    median_wave_signal = median(wave_signal, na.rm = TRUE),
+    median_sum_signal = median(sum_signal, na.rm = TRUE),
+    min_wave_signal = min(wave_signal, na.rm = TRUE),
+    min_sum_signal = min(sum_signal, na.rm = TRUE),
+    max_wave_signal = max(wave_signal, na.rm = TRUE),
+    max_sum_signal = max(sum_signal, na.rm = TRUE)
+  )
+```
+
+### Compute CpG island overlap for each 10kb region
+```{r}
+matrixCpG <- read.csv("data/landscapes/features/CpG matrix", sep='\t')
+
+cpg_gr <- makeGRangesFromDataFrame(matrixCpG,
+                                   keep.extra.columns = TRUE,
+                                   seqnames.field = "chrom",
+                                   start.field = "chromStart",
+                                   end.field = "chromEnd",
+                                   starts.in.df.are.0based = TRUE)
+```
+
+```{r}
+cpg_gr <- keepStandardChromosomes(cpg_gr, pruning.mode = "coarse")
+hits <- findOverlaps(regions, cpg_gr)
+```
+
+### Compute GC content for each 10kb region
+```{r}
+library(BSgenome.Hsapiens.UCSC.hg19)
+genome <- BSgenome.Hsapiens.UCSC.hg19
+
+v  <- Views(genome, regions)  # lazy, so it avoids loading all sequences
+gc <- letterFrequency(v, "GC")        # counts of G + C per bin
+acgt <- letterFrequency(v, "ACGT")
+
+gc_content <- ifelse(acgt > 0, gc / acgt, NA_real_)
+```
+
+```{r}
+features <- data.frame(
+  kb_id = coords$kb_id,
+  mb_id = coords$mb_id,
+  gc_content = gc_content
+)
+```
+
+```{r}
+width(pintersect(regions[queryHits(hits)], cpg_gr[subjectHits(hits)]))
+```
+
+```{r}
+hits |>
+  as.data.frame() |>
+  summarise(
+    max_index = max(queryHits),
+    min_index = min(queryHits),
+    max_width = max(width(pintersect(regions[queryHits(hits)],
+                                     cpg_gr[subjectHits(hits)]))),
+    max_subject = max(subjectHits)
+  )
+```
+
+
+```{r}
+intersected_widths <- width(pintersect(regions[queryHits(hits)],
+                                       cpg_gr[subjectHits(hits)]))
+
+# 3. Sum widths per 10-kb window index (handles multiple islands in the same bin)
+summed_widths <- tapply(intersected_widths, queryHits(hits), sum)
+
+# 4. Initialize a zero vector of length equal to your total regions (288,113)
+cpg_coverage <- numeric(length(regions))
+
+# 5. Map the summed widths back to their exact region positions by index
+cpg_coverage[as.integer(names(summed_widths))] <- summed_widths
+
+# Optional: Convert to fraction of the 10-kb window covered (range 0 to 1)
+cpg_fraction <- cpg_coverage / width(regions)
+```
+
+### Combine all features into a single data frame and save to CSV
+```{r}
+features$cpg_fraction <- cpg_fraction
+features$replication_wave_signal <- replication_table$wave_signal
+```
+
+```{r}
+write.csv(features, "data/landscapes/features/features_10kb.csv", 
+          row.names = FALSE)
+```

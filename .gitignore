@@ -8,3 +8,7 @@ logs/*
 
 # Ignore cache files
 __pycache__/*
+
+# Ignore Zone.Identifier
+*:Zone.Identifier
+
