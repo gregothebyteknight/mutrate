@@ -12,3 +12,6 @@ __pycache__/*
 # Ignore Zone.Identifier
 *:Zone.Identifier
 
+# Ignore VSCode settings
+.vscode/*
+

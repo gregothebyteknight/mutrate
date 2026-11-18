@@ -70,7 +70,7 @@ def maximization(
 
 def em_algorithm(
     mutation_df: pd.DataFrame, 
-    cosmic_path: str, 
+    signature_matrix: pd.DataFrame, 
     signature_prop: np.ndarray | None = None, 
     max_iter: int = 1000, 
     tol: float = 1e-6,
@@ -82,8 +82,7 @@ def em_algorithm(
     Input:
     * mutation_df: A pandas DataFrame containing the observed mutation counts for each trinucleotide context. 
     it should have columns "tri", "sub", and "count" representing the trinucleotide context, substitution type, and observed counts, respectively.
-    * cosmic_path: A string representing the path to the COSMIC database file.
-    * signature_matrix: A 2D numpy array of shape (96, K) representing the mutation signatures, where K is the number of signatures
+    * signature_matrix: A pandas DataFrame containing the mutation signatures.
     * signature_prop: A 1D numpy array of shape (K,) representing the initial proportions of each signature in the mixture model.
     * max_iter: An integer representing the maximum number of iterations to perform.
     * tol: A float representing the tolerance for convergence. The algorithm will stop if the change in log-likelihood is less than this value.
@@ -104,7 +103,6 @@ def em_algorithm(
     if mutation_vector.sum() == 0:
         raise ValueError("Mutation vector sums to zero; cannot run EM on empty data.")
 
-    signature_matrix = pd.read_csv(cosmic_path, index_col=0, sep='\t')  # Load the signature matrix from a CSV file
     signature_matrix = signature_matrix.loc[mutation_df_copy["mut_type"].values] # type: ignore # so mutation order would correspond
 
 
@@ -128,6 +126,7 @@ def em_algorithm(
         
         # Check for convergence
         if np.linalg.norm(new_signature_prop - signature_prop) < tol:
+            signature_prop = new_signature_prop
             print(f"Converged after {i+1} iterations.")
             break
         
