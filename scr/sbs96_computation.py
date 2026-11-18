@@ -40,7 +40,7 @@ def add_sample_metadata(mutations: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def tri_prop(seq_path: str, tri_types: list) -> np.array:
+def tri_prop(seq_path: str, tri_types: list) -> np.array: # type: ignore
     """Count trinucleotide occurrences in a DNA sequence.
 
     Parameters:
@@ -218,9 +218,12 @@ def plot_sbs96_matrix(
     *,
     sample_label: str | None = None,
     gene: str | None = None,
-    ax: plt.Axes | None = None,
-) -> plt.Axes:
+    ax: plt.Axes | None = None, # type: ignore
+    save_image: bool = True
+) -> plt.Axes: # type: ignore
     """Plot SBS-96 counts with substitution colors, legend, and context ticks."""
+    colors_list = ["#13DBF0", "#000000", "#E22642", "#999999", "#A2CD61", "#ECC4C5"]
+
     required = {"sub", "tri", "count"}
     missing = required.difference(matrix.columns)
     if missing:
@@ -235,36 +238,63 @@ def plot_sbs96_matrix(
         raise ValueError("matrix does not contain all SBS-96 channels")
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(15, 7))
+        _, ax = plt.subplots(figsize=(8, 3))
 
-    palette = sns.color_palette(n_colors=len(_SUBSTITUTIONS))
-    colors = dict(zip(_SUBSTITUTIONS, palette))
+    colors = dict(zip(_SUBSTITUTIONS, colors_list))
     ax.bar(
         range(len(_CHANNELS)),
         pd.to_numeric(ordered["count"]).to_numpy(),
-        color=[colors[sub] for sub, _ in _CHANNELS],
+        color=[colors[sub] for sub, _ in _CHANNELS], # type: ignore
     )
-    ax.set_xticks(range(len(_CHANNELS)), [tri for _, tri in _CHANNELS])
+
+    tick_positions = range(0, len(_CHANNELS), 4)
+    ax.set_xticks(
+        tick_positions,
+        [_CHANNELS[i][1] for i in tick_positions],
+    )
     ax.tick_params(axis="x", labelrotation=90, labelsize=7)
-    ax.set_xlabel("Trinucleotide context")
-    ax.set_ylabel("Mutation record count")
+    ax.tick_params(axis="y", labelsize=7)
+    ax.set_xlabel("Trinucleotide context", fontsize=8, labelpad=8)
+    ax.set_ylabel("Mutation record count", fontsize=8, labelpad=8)
     sample_label = sample_label or matrix.attrs.get("sample_label", "Selected data")
     gene = gene or matrix.attrs.get("gene", "Unspecified")
-    ax.set_title(f"Mutation Count for Sample: {sample_label} and Gene: {gene}")
+    ax.set_title(f"Mutation Count for Sample: {sample_label} and Gene: {gene}", 
+                 fontsize=10, pad=20)
     ax.set_axisbelow(True)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(
-        handles=[
-            Patch(facecolor=colors[substitution], label=substitution)
-            for substitution in _SUBSTITUTIONS
-        ],
-        title="Substitution",
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1),
-    )
+
+    for i, substitution in enumerate(_SUBSTITUTIONS):
+        x0 = i / len(_SUBSTITUTIONS)
+        x1 = (i + 1) / len(_SUBSTITUTIONS)
+        color = colors[substitution]
+
+        ax.plot(
+            [x0, x1],
+            [1.015, 1.015],
+            transform=ax.transAxes,
+            color=color,
+            linewidth=4,
+            solid_capstyle="butt",
+            clip_on=False,
+        )
+        ax.text(
+            (x0 + x1) / 2,
+            1.035,
+            substitution,
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=7,
+        )
     ax.margins(x=0.01)
     if ax.figure.axes[0] is ax:
-        ax.figure.subplots_adjust(right=0.84, bottom=0.24)
+        ax.figure.subplots_adjust(
+            top=0.84,
+            right=0.98,
+            bottom=0.28,
+            left=0.08,
+        )
 
-    plt.savefig('images/sbs96_matrix.png', dpi=300, bbox_inches="tight")
+    if save_image:
+        plt.savefig('images/sbs96_matrix.png', dpi=300, bbox_inches="tight")
     return ax

@@ -105,7 +105,7 @@ def em_algorithm(
         raise ValueError("Mutation vector sums to zero; cannot run EM on empty data.")
 
     signature_matrix = pd.read_csv(cosmic_path, index_col=0, sep='\t')  # Load the signature matrix from a CSV file
-    signature_matrix = signature_matrix.loc[mutation_df_copy["mut_type"].values] # so mutation order would correspond
+    signature_matrix = signature_matrix.loc[mutation_df_copy["mut_type"].values] # type: ignore # so mutation order would correspond
 
 
     # Initialization of signature proportions
@@ -120,7 +120,7 @@ def em_algorithm(
     
     for i in range(max_iter):
         # E-step
-        q_function, expected_counts_per_signature = expectation(mutation_vector, signature_matrix, signature_prop)
+        q_function, expected_counts_per_signature = expectation(mutation_vector, signature_matrix, signature_prop) # type: ignore
         q_function_values.append(q_function)
         
         # M-step
@@ -133,7 +133,7 @@ def em_algorithm(
         
         signature_prop = new_signature_prop
     
-    return signature_prop, q_function_values, expected_counts_per_signature, mutation_df_copy
+    return signature_prop, q_function_values, expected_counts_per_signature, mutation_df_copy # type: ignore
 
 def em_visualization(
         q_function_values: list[float]
@@ -160,29 +160,85 @@ def em_visualization(
 
 def signatures_visualization(
         expected_counts_per_signature: pd.DataFrame, 
-        normalized_matrix: pd.DataFrame
+        normalized_matrix: pd.DataFrame,
+        n_top_signatures: int = 10,
+        data_normalize: bool = False,
+        save_image: bool = False
     ) -> None:
 
 
     import matplotlib.pyplot as plt
     import seaborn as sns
     sns.set_style('whitegrid')
+    sns.set_palette("coolwarm")
+    plt.rcParams['figure.dpi'] = 300
+    plt.rcParams['savefig.dpi'] = 300
 
     total_counts_per_signature = expected_counts_per_signature.sum(axis=0)
-    top_sbs = total_counts_per_signature.nlargest(10).index
+    top_sbs = total_counts_per_signature.nlargest(n_top_signatures).index
+
+    if data_normalize:
+            total_mutations = normalized_matrix["count"].sum()
+            normalized_matrix["count"] /= total_mutations
+            expected_counts_per_signature /= total_mutations
 
     expected_counts_top_sbs = expected_counts_per_signature.loc[:, top_sbs]
 
-    fig, ax = plt.subplots(figsize=(12, 9))
-    sns.lineplot(data=expected_counts_top_sbs, ax=ax)
-    ax.bar(normalized_matrix["mut_type"], normalized_matrix["count"], alpha=0.5, color='gray', label=f"Observed\nMutation\nCounts")
 
-    ax.tick_params(axis="x", labelrotation=90, labelsize=5)
-    ax.legend(title='Legend', bbox_to_anchor=(0.02, 1), loc='upper left')
+#     sub_colors = {
+#     "C>A": "#13DBF0",
+#     "C>G": "#000000",
+#     "C>T": "#E22642",
+#     "T>A": "#999999",
+#     "T>C": "#A2CD61",
+#     "T>G": "#ECC4C5",
+# }
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    x = np.arange(len(normalized_matrix))
+    bottom = np.zeros(len(normalized_matrix))
+
+    for signature in expected_counts_top_sbs.columns:
+        values = expected_counts_top_sbs[signature].to_numpy()
+        ax.bar(x, 
+               values, 
+               bottom=bottom, 
+               label=f"Signature {signature} ({values.sum():.2f})")
+        bottom += values
+
+    ax.plot(
+        x,
+        normalized_matrix["count"].to_numpy(),
+        color='gray',
+        alpha=0.5,
+        label=f"Observed Mutations"
+        
+    )
+
+    tick_positions = range(0, len(normalized_matrix), 4)
+    ax.set_xticks(
+        tick_positions,
+        [normalized_matrix["mut_type"].iloc[i] for i in tick_positions]
+    )
+
+    # for i, tick_label in zip(tick_positions, ax.get_xticklabels()):
+    #     tick_label.set_color(
+    #         sub_colors[normalized_matrix["sub"].iloc[i]]
+    # )
+
+    ax.tick_params(axis="x", labelrotation=90, labelsize=7)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.legend(title='Legend', bbox_to_anchor=(0.02, 1), 
+              loc='upper left', title_fontsize=8, fontsize=7)
+    ax.set_xlabel("Trinucleotide context", fontsize=8, labelpad=8)
+    ax.set_ylabel("Mutation record", fontsize=8, labelpad=8)
     fig.tight_layout()
 
-    ax.set_title('EM Derived Signature Contributions vs Observed Mutation Counts')
-    plt.savefig('images/signature_image.png', dpi=300, bbox_inches="tight")
+    ax.set_title('EM Derived Signature Contributions vs Observed Mutations',
+                 fontsize=10, pad=20)
+    if save_image:
+        plt.savefig('images/signature_image.png', dpi=300, bbox_inches="tight")
     fig.show()
 
 
@@ -195,6 +251,8 @@ def signatures_visualization(
         parser.add_argument('--tol', type=float, default=1e-6, help='Tolerance for convergence (default: 1e-6).')
         parser.add_argument('--dirichlet_beta', type=float, default=0.1, help='Dirichlet prior parameter (default: 0.1).')
         parser.add_argument('--is_visualize', type=bool, default=False, help='Whether to visualize the signature contribution')
+        parser.add_argument('--n_top_signatures', type=int, default=10, help='Number of top signatures to visualize (default: 10).')
+        parser.add_argument('--save_image', type=bool, default=False, help='Whether to save the visualization as an image (default: False).')
 
         args = parser.parse_args()
 
@@ -210,4 +268,4 @@ def signatures_visualization(
         
         if args.is_visualize:
             em_visualization(q_function_values)
-            signatures_visualization(expected_counts_per_signature, normalized_matrix)
+            signatures_visualization(expected_counts_per_signature, normalized_matrix, n_top_signatures=args.n_top_signatures, save_image=args.save_image)
